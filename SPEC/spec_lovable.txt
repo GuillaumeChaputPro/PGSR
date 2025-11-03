@@ -1,0 +1,140 @@
+Contexte & cible Crée une application web (desktop + mobile responsive) pour une chaîne internationale d’hôtels/restaurants (style Hilton) afin de contrôler, piloter et reporter la conformité (incendie, électrique, hygiène, audit interne qualité). L’app doit fonctionner de l’échelle établissement jusqu’au groupe mondial (région, pays, marque, groupe).
+
+Rôles & permissions (RBAC hiérarchique) • OrgOwner (groupe) : accès global à toutes les données et paramètres, lecture/écriture/gestion. • BrandManager (marque) : lecture/écriture sur les entités de sa marque. • RegionManager (région/pays) : lecture/écriture sur les entités de son périmètre (région OU pays). • SiteManager (établissement) : lecture/écriture sur son établissement uniquement. • Auditor (interne/externe) : peut exécuter des audits, charger des preuves, créer des observations/correctifs sur les sites assignés, lecture restreinte hors site. • Viewer : lecture seule selon périmètre (brand/region/site).
+
+Modèle de données (collections / tables, avec champs & contraintes)
+
+Implémente en base relationnelle avec références fortes, clés techniques UUID, timestamps, et champs created_by, updated_by. Ajoute index utiles (ex. sur scope et status).
+
+1.	OrgUnit (unité organisationnelle)
+
+•	id: uuid
+•	type: enum["GROUP","BRAND","REGION","COUNTRY","SITE"]
+•	name: string (unique per parent)
+•	parent_id: uuid? (FK → OrgUnit)
+•	country_code: string? (ISO-2, pour COUNTRY/SITE)
+•	brand_code: string? (pour BRAND/SITE)
+•	address: string?, city: string?, lat: number?, lng: number?
+•	active: boolean default true
+
+2.	User
+
+•	id: uuid, email: string unique, full_name: string
+•	role: enum["OrgOwner","BrandManager","RegionManager","SiteManager","Auditor","Viewer"]
+•	scopes: array<uuid> (liste d’OrgUnit autorisées ; si vide et rôle = OrgOwner ⇒ global)
+•	locale: enum["en","fr"] default "en"
+•	avatar_url: string?, active: boolean default true
+
+3.	ComplianceFramework (référentiel : ex. “Incendie – Hôtels Europe 2025”)
+
+•	id: uuid, code: string unique, title: string, description: text?
+•	domain: enum["FIRE","ELECTRICAL","HYGIENE","QUALITY","OTHER"]
+•	version: string (ex. “v1.0”)
+•	valid_from: date, valid_to: date?
+•	applies_to_levels: array<enum["SITE","COUNTRY","REGION","BRAND","GROUP"]>
+
+4.	ChecklistTemplate (modèle d’audit instanciable)
+
+•	id: uuid, framework_id: uuid (FK)
+•	title: string, description: text?
+•	scoring_method: enum["SUM","WEIGHTED","PASS_FAIL"]
+•	weight_total: number default 100
+•	applicability_rules: jsonb (ex. pays/brand/typo site)
+
+5.	ChecklistItemTemplate
+
+•	id: uuid, checklist_template_id: uuid (FK)
+•	ref: string (ex. “FIRE-1.2”)
+•	label: string, help_text: text?
+•	response_type: enum["BOOLEAN","SINGLE_CHOICE","MULTI_CHOICE","NUMBER","TEXT","PHOTO","SIGNATURE"]
+•	choices: jsonb? (si choix)
+•	weight: number default 1
+•	critical: boolean default false (KO critique ⇒ audit KO)
+•	evidence_required: boolean default false
+•	legal_reference: string? (norme/codification)
+
+6.	Audit
+
+•	id: uuid, orgunit_id: uuid (FK→SITE requis), framework_id: uuid, template_id: uuid
+•	status: enum["DRAFT","IN_PROGRESS","SUBMITTED","APPROVED","REJECTED","NON_COMPLIANT","COMPLIANT"] default "DRAFT"
+•	scheduled_at: datetime?, started_at: datetime?, submitted_at: datetime?, approved_at: datetime?
+•	auditor_id: uuid (FK→User), owner_id: uuid (FK→User)
+•	score_raw: number?, score_percent: number?, critical_fail: boolean default false
+•	overall_comment: text?
+
+7.	AuditItem
+
+•	id: uuid, audit_id: uuid (FK), item_template_id: uuid (FK)
+•	response_value: jsonb? (selon type)
+•	pass: boolean?
+•	evidence_count: number default 0
+•	comment: text?
+•	nonconformity_level: enum["NONE","MINOR","MAJOR","CRITICAL"] default "NONE"
+
+8.	Evidence (GED / coffre-fort)
+
+•	id: uuid, audit_item_id: uuid (FK)?, audit_id: uuid (FK)?
+•	file_url: string, file_name: string, mime: string, size_bytes: number
+•	hash_sha256: string
+•	uploaded_by: uuid (FK→User), uploaded_at: datetime
+•	doc_type: enum["PHOTO","PDF","CERTIFICATE","REPORT","OTHER"]
+•	valid_until: date? (pour certificats)
+•	Stockage : utilise le storage Lovable (ou S3 si dispo), activer versioning si possible.
+
+9.	ActionPlan (plan d’actions correctives)
+
+•	id: uuid, audit_id: uuid (FK), title: string
+•	status: enum["OPEN","IN_PROGRESS","DONE","CANCELLED"] default "OPEN"
+•	due_date: date?, owner_id: uuid (FK→User)
+
+10.	ActionItem
+
+•	id: uuid, action_plan_id: uuid (FK), label: string, status: enum["OPEN","IN_PROGRESS","DONE","CANCELLED"], due_date: date?, assignee_id: uuid?
+
+11.	CertificateRegister (registre légal des certificats par site)
+
+•	id: uuid, orgunit_id: uuid (SITE), name: string, doc_id: uuid (FK→Evidence)
+•	domain: enum["FIRE","ELECTRICAL","HYGIENE","QUALITY","OTHER"]
+•	issued_on: date, valid_until: date, issuer: string, status: enum["VALID","EXPIRING_SOON","EXPIRED"] (champ calculé)
+Règles de permissions (appliquer dans toutes les pages & API internes) • Un utilisateur ne voit et ne modifie que les enregistrements rattachés à ses scopes (OrgUnit) et à son rôle. • OrgOwner : full access. • BrandManager : accès aux OrgUnit BRAND + descendants. • RegionManager : accès à REGION/COUNTRY + descendants. • SiteManager : accès à SITE uniquement. • Auditor : création/édition d’Audit/AuditItem/Evidence sur sites assignés, lecture du reste dans le périmètre. • Viewer : lecture seule dans le périmètre.
+
+Écrans / UX (pages & composants) 1. Login (SSO ultérieur, pour MVP email+password). 2. Dashboard (contextuel au rôle) • KPI : % conformité (30/90 jours), # audits ouverts, # actions en retard, certificats expirant (<30j). • Filtres : période, domaine (incendie/électrique/…), marque, pays, site. • Graphs : heatmap conformité par pays, barre par marque, tendance temporelle. 3. Org Explorer (vue hiérarchique) • Arbre Group → Brand → Region → Country → Site, avec stats badges (% conformité, audits ouverts). 4. Audits • Liste + filtres (status, domaine, site, date). • Détail audit : header (site, statut, score), onglets Checklist, Preuves, Plan d’actions, Historique. • Exécution checklist (mobile-first) : items avec réponses (boolean/choix/nombre/texte/photo/signature), upload multi-preuves, marquer “critique”, commentaires. • Boutons : Enregistrer, Soumettre, Approuver/Rejeter (selon rôle). 5. Référentiels • ComplianceFramework (CRUD + version), ChecklistTemplate (CRUD), ChecklistItemTemplate (CRUD) avec duplication et export/import JSON. 6. GED / Registre • Bibliothèque de documents (Evidence) avec filtres (site, type, domaine, expiration). • CertificateRegister : tableau avec statut calculé (VALID/EXPIRING/EXPIRED), alertes. 7. Administration • Utilisateurs, rôles, scopes (assignation par sélection d’OrgUnit), localisation (i18n en/fr), paramètres d’alertes.
+
+Workflows & automatisations • Audit.status machine : • DRAFT → IN_PROGRESS → SUBMITTED → (APPROVED | REJECTED) • Si critical détecté sur un item ⇒ NON_COMPLIANT. Si score ≥ seuil (ex. 85%) et aucun critique ⇒ COMPLIANT. • Scoring : recalcul à chaque modification d’AuditItem: • SUM/WEIGHTED: somme pondérée / total * 100, PASS_FAIL: 0/100 si KO critique. • Rappels certificats : tâches quotidiennes → marquer EXPIRING_SOON à J-30, envoyer notifs aux SiteManager + RegionManager. • Action plans : auto-création d’un ActionPlan si NON_COMPLIANT ou item critique KO ; copier les ActionItem proposés depuis un mapping de non-conformités (si dispo). • GED hashing : stocker hash_sha256 à l’upload ; afficher dans la fiche document. • Journal d’audit (audit trail) : log sur changements de statut, suppression document, approbation.
+
+Règles de validation & sécurité • Upload : taille max 25 MB (ajuster si Lovable le permet), extensions autorisées : pdf, jpg, png, heic. • Evidence sur item critique ⇒ evidence_required = true impose au moins 1 fichier. • Un Audit ne peut être SUBMITTED que si 100% des items répondus. • CertificateRegister.valid_until < today ⇒ statut EXPIRED. • Minimise l’exposition de données hors périmètre (toujours filtrer par scopes). • Masquer les menus non autorisés selon rôle.
+
+BI / Rapports (MVP interne Lovable) • Dashboard : • Carte/heatmap par pays avec % conformité moyen (agrégation par Audit APPROVED sur période). • Bar chart par marque et domaine. • Liste des Top 10 sites à risque (score bas, critiques présents). • Export CSV/PDF pour : liste audits, registre certificats, plan d’actions.
+
+Internationalisation (fr/en) • UI key/value fr/en (au moins pour labels principaux : menus, statuts, domaines, boutons). • Format date/heure selon locale utilisateur.
+
+Données d’exemple (seed) • OrgUnits : 1 Group (“Hilton Group”), 2 Brands (“Hilton”, “Hilton Garden”), 2 Regions (EU, AMER), 3 Countries (FR, IT, US), 5 Sites (Paris-Opéra, Rome-Centro, Milan-Duomo, NYC-Midtown, Miami-Beach). • Users : 1 OrgOwner global, 1 BrandManager (Hilton), 1 RegionManager (EU), 2 SiteManagers (Paris, Rome), 2 Auditors. • Frameworks : FIRE v1.0, ELECTRICAL v1.0. • Templates : “Fire Safety – Hotel (EU) v1.0” avec 10 items (2 critiques) ; “Electrical – Hotel (EU) v1.0” avec 8 items. • Audits : 3 en cours, 2 approuvés, 1 non conforme avec actions ouvertes. • Evidences : 5 photos, 2 certificats PDF (dont 1 expirant à J-20).
+
+Qualité & non-régression (inclure checks automatiques si possible) • Tests navigation par rôle : chaque rôle ne voit que son périmètre. • Test soumission audit avec item critique sans preuve ⇒ blocage. • Test recalcul score et changement auto de statut (COMPLIANT/NON_COMPLIANT). • Test rappels certificats (statuts, notifications). • Test export CSV/PDF (au moins 1 export par module).
+
+Livrables attendus par l’IA • Base de données créée avec toutes les collections, relations, indexes et contraintes ci-dessus. • Écrans listés (Dashboard, Org Explorer, Audits, Référentiels, GED/Registre, Admin). • Workflows et validations opérationnels. • Données d’exemple injectées. • I18n fr/en basique sur les libellés principaux. • Un guide d’utilisation (page “Help”) résumant les étapes : créer un audit, l’exécuter, soumettre, approuver, charger certificats, consulter registres et dashboards.
+
+Important : si une limite Lovable empêche une partie (ex. i18n, heatmap, hash), implémente un fallback (ex. tableau + badge pays, champ texte “hash”) et documente la limite dans la page Help.
+
+⸻
+
+🔁 PROMPTS ADD-ONS (à utiliser après la génération)
+
+Ajout mode offline (si Lovable le supporte partiellement)
+“Ajoute un cache local pour la page d’exécution de checklist : mise en file des réponses, des photos et des commentaires avec synchro dès retour réseau. Affiche un badge OFFLINE et un compteur d’éléments en attente.”
+
+Power BI/Metabase (pré-intégration)
+“Expose un endpoint JSON en lecture seule avec agrégats par niveau (site/pays/marque) : score moyen, nb audits, nb critiques, sur une période. Documente le schéma et ajoute une page ‘API’.”
+
+SSO / SCIM (placeholder)
+“Prépare une page ‘Identity & SSO (placeholder)’ avec champs de config (issuer, client_id, metadata URL) et note sur future intégration Azure AD/Okta. Ajoute un toggle ‘SCIM planned’.”
+
+Théming & branding
+“Applique un thème entreprise sombre/clair, couleurs primaires #0B5FFF et secondaire #00D2C4, logo fictif ‘Compliance One’. Page de login et favicon.”
+
+Sécurité & audit trail
+“Ajoute une collection AuditLog (who/what/when/before/after), logge chaque changement sensible (status audit, suppression evidence, modification référentiel). Ajoute un écran lecture-only pour OrgOwner.”
+
+⸻
+
+✅ Critères d’acceptation (checklist rapide) • Rôles/permissions effectives et testées par périmètre. • Création → exécution → soumission → approbation d’un audit 100% fonctionnelle. • Scoring calculé + bascule auto COMPLIANT/NON_COMPLIANT (critique). • GED opérationnelle (upload, aperçu miniature, filtres, version simple). • Registre certificats avec statuts dynamiques et rappels J-30. • Dashboards avec filtres multi-niveaux et exports. • Données seed conformes (brands, pays, sites, users). • Page Help et page Admin complètes.
