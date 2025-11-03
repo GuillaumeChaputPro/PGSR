@@ -36,8 +36,9 @@ dependencies {
     runtimeOnly("io.jsonwebtoken:jjwt-impl:0.12.6")
     runtimeOnly("io.jsonwebtoken:jjwt-jackson:0.12.6")
 
-    // Database
+    // Databases
     runtimeOnly("org.postgresql:postgresql:42.7.4")
+    runtimeOnly("com.h2database:h2:2.3.232")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.security:spring-security-test")

@@ -1,0 +1,50 @@
+services:
+  postgres-metabase:
+    image: postgres:latest
+    container_name: postgres-metabase
+    restart: always
+    environment:
+      POSTGRES_DB: metabase
+      POSTGRES_USER: metabase_user
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5433:5432"
+    volumes:
+      - ~/docker-volumes/metabase-postgres:/var/lib/postgresql/data
+    networks:
+      - metabase-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U metabase_user -d metabase"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  metabase:
+    image: metabase/metabase:latest
+    container_name: metabase
+    restart: always
+    environment:
+      MB_DB_TYPE: postgres
+      MB_DB_DBNAME: metabase
+      MB_DB_PORT: 5432
+      MB_DB_USER: metabase_user
+      MB_DB_PASS: password
+      MB_DB_HOST: postgres-metabase
+    ports:
+      - "3000:3000"
+    volumes:
+      - ~/docker-volumes/metabase-plugins:/plugins
+    networks:
+      - metabase-network
+    depends_on:
+      postgres-metabase:
+        condition: service_healthy
+    healthcheck:
+      test: curl --fail -I http://localhost:3000/api/health || exit 1
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+networks:
+  metabase-network:
+    driver: bridge
