@@ -1,0 +1,107 @@
+erDiagram
+    %% --- BUSINESS MODEL ---
+    GROUP {
+        uuid id PK
+        varchar name UK "Group name (e.g., Accor)"
+    }
+
+    BRAND {
+        uuid id PK
+        uuid group_id FK "Parent group"
+        varchar name "Brand name (e.g., Ibis, Mercure)"
+        varchar segment "luxury, upscale, midscale, economy"
+    }
+
+    REGION {
+        uuid id PK
+        varchar name UK "Europe, Asia..."
+        varchar code UK "EUR, ASIA..."
+    }
+
+    COUNTRY {
+        char code PK "ISO 3166-1 alpha-2 (e.g., FR)"
+        uuid region_id FK "Parent region"
+        varchar name
+    }
+
+    SITE {
+        uuid id PK
+        uuid brand_id FK "Parent brand"
+        char country_code FK "Site location"
+        varchar name "Site name (e.g., Ibis Paris Bastille)"
+        varchar address
+        varchar type "Hotel, Restaurant, etc."
+        decimal latitude
+        decimal longitude
+    }
+
+    %% --- SECURITY MODEL ---
+    USER {
+        uuid id PK
+        varchar email UK
+        varchar password_hash
+        varchar first_name
+        varchar last_name
+        boolean active
+        timestamp created_at
+    }
+
+    ROLE {
+        uuid id PK
+        varchar name UK "ADMIN, MANAGER, VIEWER, AUDITOR"
+        text description
+    }
+
+    %% Core assignment linking User + Role
+    USER_ASSIGNMENT {
+        uuid id PK
+        uuid user_id FK "The user"
+        uuid role_id FK "The role being assigned"
+        timestamp assigned_at
+        uuid assigned_by FK "FK to USER table"
+    }
+
+    %% Organizational scope (multiple rows possible)
+    ASSIGNMENT_ORG_SCOPE {
+        uuid id PK
+        uuid assignment_id FK "Links to USER_ASSIGNMENT"
+        uuid group_id "Scope to a specific group (nullable)"
+        uuid brand_id "Scope to a specific brand (nullable)"
+    }
+
+    %% Geographical scope (multiple rows possible)
+    ASSIGNMENT_GEO_SCOPE {
+        uuid id PK
+        uuid assignment_id FK "Links to USER_ASSIGNMENT"
+        uuid region_id "Scope to a specific region (nullable)"
+        char country_code "Scope to a specific country (nullable)"
+    }
+
+    %% Site-specific scope (multiple rows possible)
+    ASSIGNMENT_SITE_SCOPE {
+        uuid id PK
+        uuid assignment_id FK "Links to USER_ASSIGNMENT"
+        uuid site_id FK "Scope to a specific site"
+    }
+
+    %% --- BUSINESS RELATIONSHIPS ---
+    GROUP ||--o{ BRAND : "owns"
+    BRAND ||--o{ SITE : "includes"
+    REGION ||--o{ COUNTRY : "contains"
+    COUNTRY ||--o{ SITE : "hosts"
+
+    %% --- SECURITY RELATIONSHIPS ---
+    USER ||--o{ USER_ASSIGNMENT : "has"
+    ROLE ||--o{ USER_ASSIGNMENT : "is_assigned_as"
+    USER ||--o{ USER_ASSIGNMENT : "assigned_by"
+
+    USER_ASSIGNMENT ||--o{ ASSIGNMENT_ORG_SCOPE : "scoped_by_org"
+    USER_ASSIGNMENT ||--o{ ASSIGNMENT_GEO_SCOPE : "scoped_by_geo"
+    USER_ASSIGNMENT ||--o{ ASSIGNMENT_SITE_SCOPE : "scoped_by_site"
+
+    %% --- LOGICAL SCOPE RELATIONSHIPS ---
+    GROUP ||--o{ ASSIGNMENT_ORG_SCOPE : "scope_target"
+    BRAND ||--o{ ASSIGNMENT_ORG_SCOPE : "scope_target"
+    REGION ||--o{ ASSIGNMENT_GEO_SCOPE : "scope_target"
+    COUNTRY ||--o{ ASSIGNMENT_GEO_SCOPE : "scope_target"
+    SITE ||--o{ ASSIGNMENT_SITE_SCOPE : "scope_target"
